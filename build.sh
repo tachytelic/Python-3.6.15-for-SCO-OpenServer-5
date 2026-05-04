@@ -71,6 +71,21 @@ else
     touch .sco_patched
 fi
 
+# Optional: SQLite. setup.py auto-detects /usr/local/include/sqlite3.h +
+# libsqlite3.a/.so. Warn (don't fail) if absent so users know why the
+# sqlite3 module won't be there.
+if [ ! -f /usr/local/lib/libsqlite3.a ] && [ ! -f /usr/local/lib/libsqlite3.so ]; then
+    echo "NOTE: no libsqlite3.a or libsqlite3.so at /usr/local/lib/."
+    echo "      The 'sqlite3' Python module will be skipped."
+    echo "      To enable: build SQLite from the amalgamation with"
+    echo "        gcc -O2 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \\"
+    echo "          -c sqlite3.c -o sqlite3.o"
+    echo "        ar rcs /usr/local/lib/libsqlite3.a sqlite3.o"
+    echo "        cp sqlite3.h /usr/local/include/"
+    echo "      Use /usr/gnu/bin/gcc (2.95.3) for the SQLite build —"
+    echo "      GCC 3.4.6 trips on its syscall table."
+fi
+
 echo "Configuring..."
 CFLAGS="-O2 -std=gnu99" \
 CPPFLAGS="-I/usr/local/include -I/usr/local/ssl/include" \

@@ -52,7 +52,7 @@ What you don't get vs newer Python 3:
 
 ## Install
 
-The release tarball is 35 MB compressed (~117 MB unpacked). Grab `python-3.6.15-sco.tar.gz`
+The release tarball is ~35 MB compressed (~117 MB unpacked). Grab `python-3.6.15-sco.tar.gz`
 from the **Releases** page, copy it to your SCO box, and untar:
 
 ```sh
@@ -104,7 +104,7 @@ encoding choice.
 
 ## What's included
 
-39/39 smoke tests pass. Verified working:
+All smoke tests pass (40/40 with `sqlite3`). Verified working:
 
 | Category | Modules / features |
 |---|---|
@@ -115,6 +115,7 @@ encoding choice.
 | Network | `socket`, `select`, `urllib`, `urllib.request`, `http.client`, `email`, `ssl` HTTPS verified end-to-end |
 | Crypto | `hashlib` (incl. `sha3_256`, `blake2b`, `blake2s` new in 3.6), `hmac`, `secrets` |
 | Compression | `zlib`, `gzip`, `tarfile`, `zipfile`, `bz2`, `binascii`, `base64` |
+| Database | `sqlite3` — full DB-API 2.0, SQLite 3.39.4 statically linked into `_sqlite3.so` |
 | Process | `subprocess` |
 | Terminal | `readline`, `termios` |
 | Other | `uuid`, `array`, `pyexpat`, `xml.etree.ElementTree`, `unicodedata` |
@@ -127,7 +128,6 @@ encoding choice.
   isn't compatible with CPython, so this build is `--without-threads`.
 - `_curses` — SCO's curses lacks `wchgat` (wide-char curses)
 - `ctypes` — needs libffi (not on SCO)
-- `_sqlite3` — needs the SQLite development headers
 - `_lzma` — needs liblzma
 - `spwd` — SCO's `struct spwd` lacks `sp_warn`/`sp_inact`/`sp_expire`/`sp_flag`
 
@@ -156,6 +156,12 @@ Python 3.6.15 (default, May  3 2026)
 >>> def total(xs: List[int]) -> int: return sum(xs)
 >>> total([1, 2, 3, 4])
 10
+>>> import sqlite3
+>>> con = sqlite3.connect(":memory:")
+>>> con.execute("CREATE TABLE t (k TEXT, v REAL)")
+>>> con.executemany("INSERT INTO t VALUES (?, ?)", [("a", 1.5), ("b", 2.5)])
+>>> con.execute("SELECT SUM(v) FROM t").fetchone()[0]
+4.0
 ```
 
 ## Building from source
@@ -176,6 +182,20 @@ binaries). You build it on the SCO machine itself.
 - **Static OpenSSL 1.0.2** at `/usr/local/lib/{libssl,libcrypto}.a` with
   headers at `/usr/local/include/openssl/`. SCO's stock 0.9.7 is too old
   for Python 3.6's `_ssl` module.
+- *(optional)* **`libsqlite3.a`** at `/usr/local/lib/` with header at
+  `/usr/local/include/sqlite3.h` — needed for the `sqlite3` Python module.
+  Build it from the SQLite [amalgamation](https://www.sqlite.org/download.html):
+  ```sh
+  gcc -O2 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION -c sqlite3.c -o sqlite3.o
+  ar rcs /usr/local/lib/libsqlite3.a sqlite3.o
+  cp sqlite3.h /usr/local/include/
+  ```
+  Use the SCO-shipped GCC 2.95.3 (`/usr/gnu/bin/gcc`) for SQLite — GCC 3.4.6
+  trips on the syscall table that takes the address of static-inline
+  `lstat`. The resulting `.a` links cleanly into Python's `_sqlite3`
+  module built with 3.4.6 (pure-C ABI is platform-defined, not
+  compiler-specific). Skip this step and the `sqlite3` module will be
+  absent from the final install.
 
 ### Build
 
