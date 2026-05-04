@@ -1,0 +1,162 @@
+diff -ruN a/Include/longobject.h b/Include/longobject.h
+--- a/Include/longobject.h	2026-05-04 00:20:59.316449324 +0000
++++ b/Include/longobject.h	2026-05-04 00:22:06.849539936 +0000
+@@ -36,7 +36,11 @@
+ #define PyLong_AS_LONG(op) PyLong_AsLong(op)
+ 
+ /* Issue #1983: pid_t can be longer than a C long on some systems */
+-#if !defined(SIZEOF_PID_T) || SIZEOF_PID_T == SIZEOF_INT
++#if defined(SIZEOF_PID_T) && SIZEOF_PID_T == SIZEOF_SHORT
++#define _Py_PARSE_PID "h"
++#define PyLong_FromPid PyLong_FromLong
++#define PyLong_AsPid PyLong_AsLong
++#elif !defined(SIZEOF_PID_T) || SIZEOF_PID_T == SIZEOF_INT
+ #define _Py_PARSE_PID "i"
+ #define PyLong_FromPid PyLong_FromLong
+ #define PyLong_AsPid PyLong_AsLong
+diff -ruN a/Modules/_localemodule.c b/Modules/_localemodule.c
+--- a/Modules/_localemodule.c	2026-05-04 00:20:59.177451200 +0000
++++ b/Modules/_localemodule.c	2026-05-04 00:22:14.441437925 +0000
+@@ -543,6 +543,10 @@
+                instead of an empty string for nl_langinfo(ERA).  */
+             const char *result = nl_langinfo(item);
+             result = result != NULL ? result : "";
++            /* SCO fallback: if CODESET is empty/unset, claim ASCII. */
++#ifdef CODESET
++            if (item == CODESET && (result[0] == 0)) result = "ascii";
++#endif
+             return PyUnicode_DecodeLocale(result, NULL);
+         }
+     PyErr_SetString(PyExc_ValueError, "unsupported langinfo constant");
+diff -ruN a/Modules/socketmodule.c b/Modules/socketmodule.c
+--- a/Modules/socketmodule.c	2026-05-04 00:20:59.203450849 +0000
++++ b/Modules/socketmodule.c	2026-05-04 00:22:20.800352513 +0000
+@@ -271,7 +271,7 @@
+ /* Irix 6.5 fails to define this variable at all. This is needed
+    for both GCC and SGI's compiler. I'd say that the SGI headers
+    are just busted. Same thing for Solaris. */
+-#if (defined(__sgi) || defined(sun)) && !defined(INET_ADDRSTRLEN)
++#if !defined(INET_ADDRSTRLEN)
+ #define INET_ADDRSTRLEN 16
+ #endif
+ 
+diff -ruN a/Python/pylifecycle.c b/Python/pylifecycle.c
+--- a/Python/pylifecycle.c	2026-05-04 00:20:59.881441701 +0000
++++ b/Python/pylifecycle.c	2026-05-04 00:22:34.953162524 +0000
+@@ -232,8 +232,8 @@
+ #elif defined(HAVE_LANGINFO_H) && defined(CODESET)
+     char* codeset = nl_langinfo(CODESET);
+     if (!codeset || codeset[0] == '\0') {
+-        PyErr_SetString(PyExc_ValueError, "CODESET is not set or empty");
+-        return NULL;
++        /* SCO and similar platforms have no CODESET — fall back to ASCII */
++        return get_codec_name("ascii");
+     }
+     return get_codec_name(codeset);
+ #elif defined(__ANDROID__)
+diff -ruN a/Python/pytime.c b/Python/pytime.c
+--- a/Python/pytime.c	2026-05-04 00:20:59.878441742 +0000
++++ b/Python/pytime.c	2026-05-04 00:30:55.490511419 +0000
+@@ -852,3 +852,59 @@
+     return 0;
+ #endif /* MS_WINDOWS */
+ }
++
++/* ---- SCO OpenServer 5 clock shim ---------------------------------------
++ * SCO has no POSIX.1-2001 clock_gettime/clock_getres. We synthesize them
++ * on top of gettimeofday() (for CLOCK_REALTIME) and times() (for
++ * CLOCK_MONOTONIC). times()'s clock_t can wrap on long-running processes;
++ * adequate for typical Python use, NOT a substitute for real RT clocks.
++ */
++#ifdef SCO5
++#include <sys/time.h>
++#include <sys/times.h>
++#include <limits.h>
++
++int clock_gettime(clockid_t clk, struct timespec *ts) {
++    if (clk == CLOCK_REALTIME) {
++        struct timeval tv;
++        if (gettimeofday(&tv, NULL) != 0) return -1;
++        ts->tv_sec = tv.tv_sec;
++        ts->tv_nsec = (long)tv.tv_usec * 1000L;
++        return 0;
++    }
++    if (clk == CLOCK_MONOTONIC) {
++        struct tms t;
++        clock_t c = times(&t);
++        long hz = CLK_TCK;
++        if (c == (clock_t)-1) return -1;
++        ts->tv_sec = (long)(c / hz);
++        ts->tv_nsec = (long)((c % hz) * (1000000000L / hz));
++        return 0;
++    }
++    return -1;
++}
++
++int clock_getres(clockid_t clk, struct timespec *res) {
++    if (clk == CLOCK_REALTIME) {
++        res->tv_sec = 0;
++        res->tv_nsec = 1000L;  /* gettimeofday: microsecond */
++        return 0;
++    }
++    if (clk == CLOCK_MONOTONIC) {
++        long hz = CLK_TCK;
++        res->tv_sec = 0;
++        res->tv_nsec = 1000000000L / hz;
++        return 0;
++    }
++    return -1;
++}
++
++/* GIL state stubs for --without-threads. CPython 3.6 calls these
++ * from object.c and pylifecycle.c without WITH_THREAD guards.
++ * No-op implementations are safe in single-threaded builds. */
++#ifndef WITH_THREAD
++PyGILState_STATE PyGILState_Ensure(void) { return PyGILState_UNLOCKED; }
++void PyGILState_Release(PyGILState_STATE state) { (void)state; }
++PyThreadState *PyGILState_GetThisThreadState(void) { return NULL; }
++#endif
++#endif /* SCO5 */
+diff -ruN a/Python/random.c b/Python/random.c
+--- a/Python/random.c	2026-05-04 00:20:59.874441796 +0000
++++ b/Python/random.c	2026-05-04 00:55:52.865239215 +0000
+@@ -334,8 +334,19 @@
+             if (fd < 0) {
+                 if (errno == ENOENT || errno == ENXIO ||
+                     errno == ENODEV || errno == EACCES) {
+-                    PyErr_SetString(PyExc_NotImplementedError,
+-                                    "/dev/urandom (or equivalent) not found");
++                    /* SCO fallback: weak time+pid LCG. Fine for hash
++                       randomization; NOT for cryptographic use.
++                       Clear the FileNotFoundError that _Py_open raised. */
++                    unsigned int lcg = (unsigned int)time(NULL) ^
++                                       ((unsigned int)getpid() << 16) ^
++                                       (unsigned int)(unsigned long)(void *)&fd;
++                    PyErr_Clear();
++                    while (0 < size) {
++                        lcg = lcg * 1103515245u + 12345u;
++                        *buffer++ = (char)(lcg >> 16);
++                        size--;
++                    }
++                    return 0;
+                 }
+                 /* otherwise, keep the OSError exception raised by _Py_open() */
+                 return -1;
+@@ -377,7 +388,16 @@
+     else {
+         fd = _Py_open_noraise("/dev/urandom", O_RDONLY);
+         if (fd < 0) {
+-            return -1;
++            /* SCO fallback in noraise path too. */
++            unsigned int lcg2 = (unsigned int)time(NULL) ^
++                                ((unsigned int)getpid() << 16) ^
++                                (unsigned int)(unsigned long)(void *)&fd;
++            while (0 < size) {
++                lcg2 = lcg2 * 1103515245u + 12345u;
++                *buffer++ = (char)(lcg2 >> 16);
++                size--;
++            }
++            return 0;
+         }
+ 
+         while (0 < size)

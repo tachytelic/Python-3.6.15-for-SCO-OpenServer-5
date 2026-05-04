@@ -1,0 +1,15 @@
+# Local source workspace (re-extracts from upstream tarball)
+work/
+Python-3.6.15/
+Python-3.6.15.tgz
+
+# Build output
+py_install/
+
+# The prebuilt tarball ships via GitHub Releases, not via clone bloat
+prebuilt/*.tar.gz
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
