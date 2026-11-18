@@ -287,6 +287,6 @@ license — see [LICENSE](LICENSE).
   — the older sibling, no f-strings or new stdlib but slightly smaller.
 - [curl-7.88.1 for SCO](https://github.com/tachytelic/curl-7.88.1-for-SCO-OpenServer-5)
   — provides the CA bundle this build needs for HTTPS verification.
-- [More SCO OpenServer 5 binaries](https://tachytelic.net/2017/07/sco-openserver-5-binaries/)
+- [More SCO OpenServer 5 binaries](https://scoexpert.com/guides/sco-openserver-5-binaries/)
   — bash, rsync, tar, wget, lzop, … plus notes on running these
   systems day to day.
